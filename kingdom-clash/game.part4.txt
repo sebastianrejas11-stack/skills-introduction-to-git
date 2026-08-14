@@ -1,0 +1,131 @@
+    for(let x=0;x<WORLD_W;x+=80){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,WORLD_H);ctx.stroke();}
+    for(let y=0;y<WORLD_H;y+=80){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(WORLD_W,y);ctx.stroke();}
+    ctx.globalAlpha=1;
+
+    // river-ish road
+    ctx.strokeStyle='rgba(218,196,137,.25)';ctx.lineWidth=95;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(800,60);ctx.bezierCurveTo(720,280,885,600,800,840);ctx.stroke();
+
+    for(const r of state.resources) drawResource(r);
+    for(const b of state.buildings) drawBuilding(b);
+    for(const u of state.units) drawUnit(u);
+
+    if(selectedId){
+      const e=findEntity(selectedId);
+      if(e){ctx.strokeStyle='#ffe68a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(e.x,e.y,entityRadius(e)+9,0,Math.PI*2);ctx.stroke();}
+    }
+  }
+
+  function drawResource(r){
+    ctx.save();ctx.translate(r.x,r.y);
+    if(r.type==='wood'){
+      ctx.fillStyle='#5d3d24';ctx.fillRect(-5,5,10,18);
+      ctx.fillStyle='#174d27';
+      for(const a of [[0,-8],[-11,2],[11,2]]){ctx.beginPath();ctx.arc(a[0],a[1],13,0,Math.PI*2);ctx.fill();}
+    } else if(r.type==='food'){
+      ctx.fillStyle='#d6cbb5';ctx.beginPath();ctx.arc(0,2,12,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#78452b';ctx.fillRect(9,-4,10,4);ctx.fillRect(-19,-4,10,4);
+    } else {
+      ctx.fillStyle='#d9ad31';ctx.beginPath();ctx.moveTo(-17,12);ctx.lineTo(-7,-12);ctx.lineTo(7,-15);ctx.lineTo(18,12);ctx.closePath();ctx.fill();
+      ctx.strokeStyle='#8a6618';ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBuilding(b){
+    const def=buildingDefs[b.type];ctx.save();ctx.translate(b.x,b.y);
+    ctx.fillStyle='rgba(0,0,0,.2)';ctx.fillRect(-def.w/2+7,-def.h/2+9,def.w,def.h);
+    ctx.fillStyle=b.type==='tc'?'#d1b16b':'#9a7549';ctx.fillRect(-def.w/2,-def.h/2,def.w,def.h);
+    ctx.strokeStyle=DARK[b.owner];ctx.lineWidth=7;ctx.strokeRect(-def.w/2,-def.h/2,def.w,def.h);
+    ctx.fillStyle=COLORS[b.owner];ctx.fillRect(-def.w/2,-def.h/2,def.w,13);
+    if(b.type==='tc'){
+      ctx.fillStyle='#65462c';ctx.fillRect(-13,8,26,31);
+      ctx.fillStyle='#eee0b7';ctx.fillRect(-23,-15,17,17);ctx.fillRect(6,-15,17,17);
+    }else{
+      ctx.fillStyle='#503921';ctx.fillRect(-12,4,24,27);
+      ctx.strokeStyle='#d8c89e';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-17,-14);ctx.lineTo(17,15);ctx.moveTo(17,-14);ctx.lineTo(-17,15);ctx.stroke();
+    }
+    drawHpLocal(b.hp,b.maxHp,def.w,def.h/2+10);
+    ctx.restore();
+  }
+
+  function drawUnit(u){
+    const def=unitDefs[u.type];ctx.save();ctx.translate(u.x,u.y);
+    ctx.fillStyle='rgba(0,0,0,.25)';ctx.beginPath();ctx.ellipse(3,7,def.r+3,def.r*.55,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=COLORS[u.owner];ctx.beginPath();ctx.arc(0,0,def.r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#1e1a13';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#f0d1a2';ctx.beginPath();ctx.arc(0,-4,5,0,Math.PI*2);ctx.fill();
+    if(u.type==='swordsman'){
+      ctx.strokeStyle='#e6e8e7';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(7,-2);ctx.lineTo(17,-12);ctx.stroke();
+      ctx.fillStyle='#c9c9c9';ctx.fillRect(-6,-9,12,4);
+    } else {
+      ctx.strokeStyle='#553619';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(15,8);ctx.stroke();
+    }
+    drawHpLocal(u.hp,u.maxHp,26,def.r+8);
+    ctx.restore();
+  }
+
+  function drawHpLocal(hp,maxHp,w,y){
+    const pct=clamp(hp/maxHp,0,1);
+    ctx.fillStyle='rgba(60,13,13,.8)';ctx.fillRect(-w/2,y,w,5);
+    ctx.fillStyle=pct>.45?'#6fd06a':pct>.2?'#e2b347':'#e25050';ctx.fillRect(-w/2,y,w*pct,5);
+  }
+
+  function updateUI(){
+    if(!state) return;
+    const p=state.players[myPlayer];
+    $('food').textContent=Math.floor(p.food);
+    $('wood').textContent=Math.floor(p.wood);
+    $('gold').textContent=Math.floor(p.gold);
+    $('pop').textContent=`${currentPop(myPlayer)}/${p.popCap}`;
+    $('netState').textContent=(isHost?'Anfitrión':'Invitado')+' · '+(conn&&conn.open?'en línea':'conectando');
+
+    const me=state.players[myPlayer], other=state.players[1-myPlayer];
+    $('scoreCard').innerHTML=`<h3>Marcador</h3><div class="small"><b style="color:${COLORS[myPlayer]}">${escapeHtml(me.name)}</b>: ${state.units.filter(u=>u.owner===myPlayer).length} unidades<br><b style="color:${COLORS[1-myPlayer]}">${escapeHtml(other.name)}</b>: ${state.units.filter(u=>u.owner===1-myPlayer).length} unidades</div>`;
+
+    const e=selectedId?findEntity(selectedId):null;
+    if(!e || e.owner!==myPlayer){
+      if(selectedId && !e) selectedId=null;
+      $('selectionCard').innerHTML='<h3>Nada seleccionado</h3><div class="small">Selecciona una unidad o edificio tuyo.</div>';
+      $('actionsCard').style.display='none';
+      return;
+    }
+    const def=unitDefs[e.type]||buildingDefs[e.type];
+    $('selectionCard').innerHTML=`<h3>${escapeHtml(def.label)}</h3><div class="small">${e.type==='villager'?'Trabaja y recolecta recursos.':e.type==='swordsman'?'Unidad cuerpo a cuerpo.':'Edificio de tu reino.'}</div><div class="hpbar"><div class="hpfill" style="width:${clamp(e.hp/e.maxHp*100,0,100)}%"></div></div><div class="small">❤️ ${Math.max(0,Math.ceil(e.hp))} / ${e.maxHp}</div>`;
+
+    const actions=[];
+    if(e.type==='tc') actions.push({label:'👤 Crear aldeano<br><span>50 🍖</span>',unit:'villager'});
+    if(e.type==='barracks') actions.push({label:'⚔️ Crear espadachín<br><span>60 🍖 · 25 🪙</span>',unit:'swordsman'});
+    if(actions.length){
+      $('actionsCard').style.display='block';$('actionGrid').innerHTML='';
+      for(const a of actions){
+        const btn=document.createElement('button');btn.className='action';btn.innerHTML=a.label;
+        btn.onclick=()=>sendCommand({type:'train',buildingId:e.id,unitType:a.unit});
+        $('actionGrid').appendChild(btn);
+      }
+    } else $('actionsCard').style.display='none';
+  }
+
+  function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+
+  function showEnd(winner){
+    if(!$('game').classList.contains('active') || !state) return;
+    $('endTitle').textContent=winner===myPlayer?'🏆 ¡Victoria!':'💀 Derrota';
+    $('endText').textContent=winner===myPlayer?'El reino rival ha caído.':'Tu Centro Urbano fue destruido.';
+    $('endOverlay').classList.add('show');
+  }
+
+  function backToMenu(){
+    destroyNetwork();
+    $('game').classList.remove('active');$('menu').classList.add('active');$('endOverlay').classList.remove('show');
+    $('roomInfo').style.display='none';setMenuStatus('');
+  }
+  $('leaveBtn').addEventListener('click',backToMenu);
+  $('backBtn').addEventListener('click',backToMenu);
+
+  // Small local fallback for testing alone: append ?solo=1 to the URL.
+  const qs=new URLSearchParams(location.search);
+  if(qs.get('solo')==='1'){
+    isHost=true;myPlayer=0;localName='Sebastián';state=makeInitialState('Sebastián','IA quieta');startGame();
+  }
+})();
