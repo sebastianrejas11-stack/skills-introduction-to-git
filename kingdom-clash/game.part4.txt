@@ -100,7 +100,13 @@
       $('actionsCard').style.display='block';$('actionGrid').innerHTML='';
       for(const a of actions){
         const btn=document.createElement('button');btn.className='action';btn.innerHTML=a.label;
-        btn.onclick=()=>sendCommand({type:'train',buildingId:e.id,unitType:a.unit});
+        // La interfaz se redibuja continuamente. Ejecutamos la orden en pointerdown
+        // para que el botón no pueda ser reemplazado antes de completar un click.
+        btn.addEventListener('pointerdown',ev=>{
+          ev.preventDefault();
+          ev.stopPropagation();
+          sendCommand({type:'train',buildingId:e.id,unitType:a.unit});
+        });
         $('actionGrid').appendChild(btn);
       }
     } else $('actionsCard').style.display='none';
