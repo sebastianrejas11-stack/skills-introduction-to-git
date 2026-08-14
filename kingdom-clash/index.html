@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kingdom Clash — RTS 1v1</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<section id="menu" class="screen active">
+  <div class="menu-card">
+    <h1>Kingdom Clash</h1>
+    <div class="subtitle">Mini RTS medieval 1 vs 1 · inspirado en los clásicos, hecho para jugar desde dos navegadores.</div>
+    <div class="menu-grid">
+      <div class="menu-box">
+        <h2>👑 Crear partida</h2>
+        <p class="small">Tú serás el anfitrión. Comparte el código de sala con tu novio.</p>
+        <input id="hostName" maxlength="18" placeholder="Tu nombre" value="Sebastián" />
+        <button id="hostBtn" class="primary">Crear sala</button>
+      </div>
+      <div class="menu-box">
+        <h2>⚔️ Unirse</h2>
+        <input id="guestName" maxlength="18" placeholder="Tu nombre" value="Jugador 2" />
+        <input id="joinCode" placeholder="Código de sala" autocomplete="off" />
+        <button id="joinBtn" class="secondary">Entrar a la batalla</button>
+      </div>
+    </div>
+    <div id="roomInfo">
+      <div class="small">Código de tu sala:</div>
+      <div id="roomCode"></div>
+      <button id="copyBtn" class="secondary" style="margin-top:9px">Copiar código</button>
+      <div class="small" style="margin-top:8px">Deja esta pestaña abierta. La partida empezará cuando el segundo jugador se conecte.</div>
+    </div>
+    <div id="menuStatus" class="status"></div>
+    <div class="tips"><b>Cómo se juega:</b> selecciona tus unidades con clic izquierdo. Haz clic derecho para moverlas, mandar aldeanos a recolectar o atacar enemigos. Crea aldeanos en tu Centro Urbano y espadachines en tu Cuartel. Gana destruyendo el Centro Urbano rival.</div>
+  </div>
+</section>
+
+<section id="game" class="screen">
+  <div id="topbar">
+    <div class="brand">KINGDOM CLASH</div>
+    <div class="resources">
+      <div class="res">🍖 Comida <b id="food">0</b></div>
+      <div class="res">🪵 Madera <b id="wood">0</b></div>
+      <div class="res">🪙 Oro <b id="gold">0</b></div>
+      <div class="res">👥 Población <b id="pop">0/0</b></div>
+    </div>
+    <div id="netState">Conectado</div>
+    <button id="leaveBtn" class="danger">Salir</button>
+  </div>
+  <div id="layout">
+    <div id="worldWrap">
+      <canvas id="gameCanvas"></canvas>
+      <div id="message"></div>
+    </div>
+    <aside id="panel">
+      <h2 class="panel-title">Consejo del reino</h2>
+      <div id="selectionCard" class="card">
+        <h3>Nada seleccionado</h3>
+        <div class="small">Selecciona una unidad o edificio tuyo.</div>
+      </div>
+      <div id="actionsCard" class="card" style="display:none">
+        <h3>Acciones</h3>
+        <div id="actionGrid" class="action-grid"></div>
+      </div>
+      <div class="card">
+        <h3>Objetivo</h3>
+        <div class="small">🏰 Destruye el Centro Urbano enemigo.<br><br>Los aldeanos recolectan automáticamente al llegar a un recurso. Los soldados atacan al acercarse al objetivo.</div>
+      </div>
+      <div id="scoreCard" class="card"></div>
+      <div id="miniHelp">🖱️ Izquierdo: seleccionar<br>🖱️ Derecho: mover / recolectar / atacar<br>⌨️ Esc: cancelar selección<br>🔎 La cámara muestra todo el campo de batalla.</div>
+    </aside>
+  </div>
+</section>
+
+<div id="endOverlay">
+  <div class="endCard">
+    <h2 id="endTitle">Victoria</h2>
+    <p id="endText"></p>
+    <button id="backBtn" class="primary">Volver al menú</button>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
