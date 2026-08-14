@@ -1,0 +1,140 @@
+    if(!raw){ setMenuStatus('Escribe el código de la sala.'); return; }
+    roomId = raw.startsWith('kingdom-clash-') ? raw : 'kingdom-clash-' + raw;
+    setMenuStatus('Buscando la sala…');
+
+    peer = new Peer();
+    peer.on('open', ()=>{
+      conn = peer.connect(roomId,{reliable:true,metadata:{name:localName}});
+      bindGuestConnection(conn);
+    });
+    peer.on('error', err=>{
+      console.error(err);
+      setMenuStatus('No pude conectar. Revisa el código y que el anfitrión siga conectado.');
+    });
+  });
+
+  $('copyBtn').addEventListener('click', async ()=>{
+    const text=$('roomCode').textContent;
+    try{ await navigator.clipboard.writeText(text); setMenuStatus('Código copiado. Envíalo a tu novio.',true); }
+    catch(e){ setMenuStatus('Copia manualmente el código de arriba.'); }
+  });
+
+  function bindHostConnection(c){
+    c.on('open', ()=>{
+      const guestName = sanitizeName(c.metadata && c.metadata.name ? c.metadata.name : 'Jugador 2');
+      state = makeInitialState(localName,guestName);
+      c.send({type:'welcome',player:1,state});
+      startGame();
+    });
+    c.on('data', data=>{
+      if(!data || typeof data!=='object') return;
+      if(data.type==='command') processCommand(1,data.command);
+      if(data.type==='ping') c.send({type:'pong',t:data.t});
+    });
+    c.on('close', ()=>showMessage('El rival se desconectó'));
+  }
+
+  function bindGuestConnection(c){
+    c.on('open', ()=>setMenuStatus('Conectado. Sincronizando partida…',true));
+    c.on('data', data=>{
+      if(!data || typeof data!=='object') return;
+      if(data.type==='welcome'){
+        myPlayer = data.player;
+        state = data.state;
+        startGame();
+      } else if(data.type==='state'){
+        state = data.state;
+        if(state && state.winner!==null) showEnd(state.winner);
+      }
+    });
+    c.on('close', ()=>showMessage('Conexión cerrada'));
+    c.on('error', err=>{ console.error(err); setMenuStatus('Error de conexión.'); });
+  }
+
+  function startGame(){
+    $('menu').classList.remove('active');
+    $('game').classList.add('active');
+    $('endOverlay').classList.remove('show');
+    selectedId=null;
+    resizeCanvas();
+    updateUI();
+    lastTick=performance.now();
+    if(isHost){
+      simTimer=setInterval(hostTick,TICK_MS);
+      broadcastTimer=setInterval(()=>{
+        if(conn && conn.open && state) conn.send({type:'state',state});
+      },100);
+    }
+    requestAnimationFrame(renderLoop);
+  }
+
+  function sendCommand(command){
+    if(!state || state.winner!==null) return;
+    if(isHost) processCommand(0,command);
+    else if(conn && conn.open) conn.send({type:'command',command});
+  }
+
+  function processCommand(player,cmd){
+    if(!state || !cmd || state.winner!==null) return;
+    if(cmd.type==='order'){
+      const u=state.units.find(x=>x.id===cmd.unitId && x.owner===player);
+      if(!u) return;
+      if(cmd.targetKind==='point') u.order={kind:'move',x:clamp(cmd.x,20,WORLD_W-20),y:clamp(cmd.y,20,WORLD_H-20)};
+      else if(cmd.targetKind==='resource'){
+        const r=state.resources.find(x=>x.id===cmd.targetId && x.amount>0);
+        if(r && u.type==='villager') u.order={kind:'gather',targetId:r.id};
+      } else if(cmd.targetKind==='enemy'){
+        const t=findEntity(cmd.targetId);
+        if(t && t.owner!==player && t.owner!==undefined) u.order={kind:'attack',targetId:t.id};
+      }
+    }
+    if(cmd.type==='train') trainUnit(player,cmd.buildingId,cmd.unitType);
+  }
+
+  function trainUnit(player,buildingId,unitType){
+    const b=state.buildings.find(x=>x.id===buildingId && x.owner===player);
+    const def=unitDefs[unitType];
+    if(!b || !def) return;
+    if(unitType==='villager' && b.type!=='tc') return;
+    if(unitType==='swordsman' && b.type!=='barracks') return;
+    const p=state.players[player];
+    if(currentPop(player)+def.pop>p.popCap){ if(player===myPlayer) showMessage('Necesitas más población'); return; }
+    for(const [k,v] of Object.entries(def.cost)) if((p[k]||0)<v){ if(player===myPlayer) showMessage('No tienes suficientes recursos'); return; }
+    for(const [k,v] of Object.entries(def.cost)) p[k]-=v;
+    const angle=Math.random()*Math.PI*2;
+    const dist=(buildingDefs[b.type].w/2)+30;
+    state.units.push({
+      id:uid('u'),type:unitType,owner:player,
+      x:clamp(b.x+Math.cos(angle)*dist,20,WORLD_W-20),
+      y:clamp(b.y+Math.sin(angle)*dist,20,WORLD_H-20),
+      hp:def.hp,maxHp:def.hp,order:null,attackCd:0,carry:0,gatherType:null
+    });
+  }
+
+  function currentPop(player){
+    return state ? state.units.filter(u=>u.owner===player).reduce((a,u)=>a+(unitDefs[u.type]?.pop||0),0) : 0;
+  }
+
+  function hostTick(){
+    if(!state || state.winner!==null) return;
+    const now=performance.now();
+    const dt=Math.min(.12,(now-lastTick)/1000);
+    lastTick=now;
+    state.time += dt;
+    for(const u of [...state.units]) updateUnit(u,dt);
+    state.resources=state.resources.filter(r=>r.amount>0);
+    checkVictory();
+  }
+
+  function updateUnit(u,dt){
+    if(u.attackCd>0) u.attackCd-=dt;
+    if(!u.order) return;
+    const def=unitDefs[u.type];
+
+    if(u.order.kind==='move'){
+      if(moveToward(u,u.order.x,u.order.y,def.speed,dt)<5) u.order=null;
+      return;
+    }
+
+    if(u.order.kind==='gather'){
+      const r=state.resources.find(x=>x.id===u.order.targetId && x.amount>0);
