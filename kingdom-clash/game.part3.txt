@@ -1,0 +1,140 @@
+      if(!r){ u.order=null; return; }
+      const dist=distance(u,r);
+      if(dist>27){ moveToward(u,r.x,r.y,def.speed,dt); }
+      else{
+        const take=Math.min(r.amount,7*dt);
+        r.amount-=take;
+        state.players[u.owner][r.type]+=take;
+      }
+      return;
+    }
+
+    if(u.order.kind==='attack'){
+      const t=findEntity(u.order.targetId);
+      if(!t || t.hp<=0 || t.owner===u.owner){ u.order=null; return; }
+      const hitRange=def.range + entityRadius(t);
+      const dist=distance(u,t);
+      if(dist>hitRange){ moveToward(u,t.x,t.y,def.speed,dt); }
+      else if(u.attackCd<=0){
+        t.hp-=def.damage;
+        u.attackCd=def.cooldown;
+        if(t.hp<=0){ destroyEntity(t.id); u.order=null; }
+      }
+    }
+  }
+
+  function moveToward(u,x,y,speed,dt){
+    const dx=x-u.x,dy=y-u.y,d=Math.hypot(dx,dy);
+    if(d<.001) return 0;
+    const step=Math.min(d,speed*dt);
+    u.x+=dx/d*step; u.y+=dy/d*step;
+    return d-step;
+  }
+
+  function destroyEntity(id){
+    state.units=state.units.filter(x=>x.id!==id);
+    state.buildings=state.buildings.filter(x=>x.id!==id);
+  }
+
+  function checkVictory(){
+    const alive=[0,1].map(p=>state.buildings.some(b=>b.owner===p && b.type==='tc'));
+    if(!alive[0] || !alive[1]){
+      state.winner=alive[0]?0:1;
+      if(conn && conn.open) conn.send({type:'state',state});
+      showEnd(state.winner);
+    }
+  }
+
+  function findEntity(id){
+    return state.units.find(x=>x.id===id) || state.buildings.find(x=>x.id===id) || null;
+  }
+
+  function entityRadius(e){
+    if(e.type && unitDefs[e.type]) return unitDefs[e.type].r;
+    if(e.type && buildingDefs[e.type]) return Math.max(buildingDefs[e.type].w,buildingDefs[e.type].h)/2;
+    return 12;
+  }
+
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+  function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+
+  function resizeCanvas(){
+    const wrap=$('worldWrap');
+    const w=Math.max(320,wrap.clientWidth),h=Math.max(320,wrap.clientHeight);
+    dpr=Math.min(2,window.devicePixelRatio||1);
+    canvas.width=Math.floor(w*dpr); canvas.height=Math.floor(h*dpr);
+    canvas.style.width=w+'px';canvas.style.height=h+'px';
+    canvasRect=canvas.getBoundingClientRect();
+  }
+  window.addEventListener('resize',resizeCanvas);
+
+  function screenToWorld(clientX,clientY){
+    canvasRect=canvas.getBoundingClientRect();
+    const x=(clientX-canvasRect.left)/canvasRect.width*WORLD_W;
+    const y=(clientY-canvasRect.top)/canvasRect.height*WORLD_H;
+    return {x,y};
+  }
+
+  canvas.addEventListener('contextmenu',e=>e.preventDefault());
+  canvas.addEventListener('mousedown',e=>{
+    if(!state) return;
+    const p=screenToWorld(e.clientX,e.clientY);
+    if(e.button===0){
+      const own=hitTestEntity(p.x,p.y,true);
+      selectedId=own ? own.id : null;
+      updateUI();
+    } else if(e.button===2 && selectedId){
+      const u=state.units.find(x=>x.id===selectedId && x.owner===myPlayer);
+      if(!u) return;
+      const enemy=hitTestEnemy(p.x,p.y);
+      if(enemy){ sendCommand({type:'order',unitId:u.id,targetKind:'enemy',targetId:enemy.id}); return; }
+      const r=hitTestResource(p.x,p.y);
+      if(r && u.type==='villager'){ sendCommand({type:'order',unitId:u.id,targetKind:'resource',targetId:r.id}); return; }
+      sendCommand({type:'order',unitId:u.id,targetKind:'point',x:p.x,y:p.y});
+    }
+  });
+
+  window.addEventListener('keydown',e=>{if(e.key==='Escape'){selectedId=null;updateUI();}});
+
+  function hitTestEntity(x,y,ownOnly=false){
+    if(!state) return null;
+    const all=[...state.units,...state.buildings];
+    for(let i=all.length-1;i>=0;i--){
+      const e=all[i];
+      if(ownOnly && e.owner!==myPlayer) continue;
+      if(distance({x,y},e)<=entityRadius(e)+5) return e;
+    }
+    return null;
+  }
+  function hitTestEnemy(x,y){
+    const all=[...state.units,...state.buildings];
+    for(let i=all.length-1;i>=0;i--){
+      const e=all[i]; if(e.owner===myPlayer) continue;
+      if(distance({x,y},e)<=entityRadius(e)+6) return e;
+    }
+    return null;
+  }
+  function hitTestResource(x,y){
+    for(let i=state.resources.length-1;i>=0;i--){
+      const r=state.resources[i]; if(distance({x,y},r)<=22) return r;
+    }
+    return null;
+  }
+
+  function renderLoop(){
+    if(!$('game').classList.contains('active')) return;
+    draw(); updateUI();
+    requestAnimationFrame(renderLoop);
+  }
+
+  function draw(){
+    if(!state) return;
+    const sx=canvas.width/WORLD_W, sy=canvas.height/WORLD_H;
+    ctx.setTransform(sx,0,0,sy,0,0);
+    ctx.clearRect(0,0,WORLD_W,WORLD_H);
+
+    const grad=ctx.createLinearGradient(0,0,0,WORLD_H);
+    grad.addColorStop(0,'#5e7c43'); grad.addColorStop(1,'#496737');
+    ctx.fillStyle=grad;ctx.fillRect(0,0,WORLD_W,WORLD_H);
+
+    ctx.globalAlpha=.10;ctx.strokeStyle='#22301c';ctx.lineWidth=2;
