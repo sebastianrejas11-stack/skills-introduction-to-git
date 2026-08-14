@@ -1,0 +1,140 @@
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const WORLD_W = 1600;
+  const WORLD_H = 900;
+  const COLORS = ['#5aa7ff','#ef6666'];
+  const DARK = ['#2464ad','#a82d2d'];
+  const TICK_MS = 50;
+
+  let peer = null;
+  let conn = null;
+  let isHost = false;
+  let myPlayer = 0;
+  let roomId = '';
+  let localName = '';
+  let state = null;
+  let lastTick = performance.now();
+  let simTimer = null;
+  let broadcastTimer = null;
+  let selectedId = null;
+  let messageTimer = null;
+  let canvasRect = null;
+  let dpr = 1;
+
+  const unitDefs = {
+    villager:{label:'Aldeano',r:10,hp:45,speed:72,damage:3,range:25,cooldown:.85,cost:{food:50},pop:1},
+    swordsman:{label:'Espadachín',r:11,hp:80,speed:62,damage:11,range:30,cooldown:.75,cost:{food:60,gold:25},pop:1}
+  };
+
+  const buildingDefs = {
+    tc:{label:'Centro Urbano',w:78,h:78,hp:900,cost:{},popCap:10},
+    barracks:{label:'Cuartel',w:62,h:62,hp:520,cost:{wood:150},popCap:0}
+  };
+
+  function uid(prefix='e'){
+    return prefix + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-4);
+  }
+
+  function makeInitialState(hostName, guestName){
+    const s = {
+      version:1,
+      time:0,
+      winner:null,
+      players:[
+        {name:hostName || 'Jugador 1',food:260,wood:300,gold:140,popCap:10},
+        {name:guestName || 'Jugador 2',food:260,wood:300,gold:140,popCap:10}
+      ],
+      units:[],buildings:[],resources:[]
+    };
+
+    s.buildings.push(
+      {id:'tc0',type:'tc',owner:0,x:170,y:450,hp:900,maxHp:900},
+      {id:'b0',type:'barracks',owner:0,x:265,y:555,hp:520,maxHp:520},
+      {id:'tc1',type:'tc',owner:1,x:1430,y:450,hp:900,maxHp:900},
+      {id:'b1',type:'barracks',owner:1,x:1335,y:345,hp:520,maxHp:520}
+    );
+
+    for(let i=0;i<3;i++){
+      s.units.push({id:uid('u'),type:'villager',owner:0,x:210+35*i,y:385+18*i,hp:45,maxHp:45,order:null,attackCd:0,carry:0,gatherType:null});
+      s.units.push({id:uid('u'),type:'villager',owner:1,x:1390-35*i,y:515-18*i,hp:45,maxHp:45,order:null,attackCd:0,carry:0,gatherType:null});
+    }
+    s.units.push({id:uid('u'),type:'swordsman',owner:0,x:295,y:455,hp:80,maxHp:80,order:null,attackCd:0});
+    s.units.push({id:uid('u'),type:'swordsman',owner:1,x:1305,y:445,hp:80,maxHp:80,order:null,attackCd:0});
+
+    const nodes = [
+      ['wood',430,210,700],['wood',520,250,700],['wood',450,690,700],['wood',540,650,700],
+      ['wood',1170,210,700],['wood',1080,250,700],['wood',1150,690,700],['wood',1060,650,700],
+      ['food',360,450,520],['food',1240,450,520],['food',780,250,650],['food',820,650,650],
+      ['gold',650,430,480],['gold',950,470,480],['gold',800,450,650]
+    ];
+    nodes.forEach((n,i)=>s.resources.push({id:'r'+i,type:n[0],x:n[1],y:n[2],amount:n[3]}));
+    return s;
+  }
+
+  function sanitizeName(s){
+    return (s || '').trim().slice(0,18) || 'Jugador';
+  }
+
+  function randomRoom(){
+    const a = Math.random().toString(36).slice(2,6).toUpperCase();
+    const b = Math.random().toString(36).slice(2,6).toUpperCase();
+    return `KC-${a}-${b}`;
+  }
+
+  function setMenuStatus(text, good=false){
+    $('menuStatus').textContent = text;
+    $('menuStatus').style.color = good ? '#72ca81' : '#bea977';
+  }
+
+  function showMessage(text){
+    const el = $('message');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(messageTimer);
+    messageTimer = setTimeout(()=>el.classList.remove('show'),1800);
+  }
+
+  function destroyNetwork(){
+    clearInterval(simTimer); simTimer=null;
+    clearInterval(broadcastTimer); broadcastTimer=null;
+    try{ if(conn) conn.close(); }catch(e){}
+    try{ if(peer) peer.destroy(); }catch(e){}
+    peer=null; conn=null; state=null; selectedId=null;
+  }
+
+  $('hostBtn').addEventListener('click', ()=>{
+    destroyNetwork();
+    isHost = true;
+    myPlayer = 0;
+    localName = sanitizeName($('hostName').value);
+    roomId = 'kingdom-clash-' + randomRoom().toLowerCase();
+    setMenuStatus('Creando sala…');
+    $('roomInfo').style.display='none';
+
+    peer = new Peer(roomId);
+    peer.on('open', ()=>{
+      $('roomCode').textContent = roomId.replace('kingdom-clash-','').toUpperCase();
+      $('roomInfo').style.display='block';
+      setMenuStatus('Sala lista. Esperando al segundo jugador…',true);
+    });
+    peer.on('connection', c=>{
+      if(conn && conn.open){ c.close(); return; }
+      conn = c;
+      bindHostConnection(c);
+    });
+    peer.on('error', err=>{
+      console.error(err);
+      setMenuStatus('No se pudo crear la sala. Prueba otra vez.');
+    });
+  });
+
+  $('joinBtn').addEventListener('click', ()=>{
+    destroyNetwork();
+    isHost = false;
+    myPlayer = 1;
+    localName = sanitizeName($('guestName').value);
+    const raw = $('joinCode').value.trim().toLowerCase();
